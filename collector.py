@@ -93,7 +93,7 @@ def batch_fill_history(symbol, db_path, earliest_time=None):
         if earliest_time is not None:
             start_ms = earliest_time
         else:
-            start_ms = int(datetime(2020, 1, 1, 0, 0).timestamp()) * 1000
+            start_ms = int(datetime(2022, 1, 1, 0, 0).timestamp()) * 1000
     else:
         start_ms = last_time + 60000
     now_ms = int(time.time()) * 1000

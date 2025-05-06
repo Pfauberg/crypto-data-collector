@@ -12,6 +12,8 @@ BINANCE_API_KEY = os.getenv("BINANCE_API")
 BINANCE_SECRET = os.getenv("BINANCE_SECRET")
 
 DB_FOLDER = "db"
+os.makedirs(DB_FOLDER, exist_ok=True)
+
 TABLE_NAME = "kline"
 SYMBOLS = [
     "BTCUSDT",
@@ -44,6 +46,28 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s [%(name)s]: %(message)s
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+def create_empty_db(db_path):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+            open_time INTEGER PRIMARY KEY,
+            open TEXT,
+            high TEXT,
+            low TEXT,
+            close TEXT,
+            volume TEXT,
+            close_time INTEGER,
+            quote_asset_volume TEXT,
+            number_of_trades INTEGER,
+            taker_buy_base_asset_volume TEXT,
+            taker_buy_quote_asset_volume TEXT,
+            ignore TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 def get_last_open_time(db_path):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -69,7 +93,7 @@ def batch_fill_history(symbol, db_path, earliest_time=None):
         if earliest_time is not None:
             start_ms = earliest_time
         else:
-            start_ms = int(datetime(2017, 8, 17, 4, 0).timestamp()) * 1000
+            start_ms = int(datetime(2020, 1, 1, 0, 0).timestamp()) * 1000
     else:
         start_ms = last_time + 60000
     now_ms = int(time.time()) * 1000
@@ -113,6 +137,12 @@ def fetch_binance_n_klines(symbol, n):
     data = r.json()
     return data if data else []
 
+def init_all_databases():
+    for symbol in SYMBOLS:
+        db_path = os.path.join(DB_FOLDER, f"{symbol}.sqlite")
+        create_empty_db(db_path)
+        logger.info(f"DB created/ensured for {symbol}")
+
 def minute_loop():
     logger.info("Minute candles monitor started (batch fill + RT sync, 1000 min, auto log rotation)")
     while True:
@@ -137,4 +167,5 @@ def minute_loop():
         time.sleep(max(2, secs_until_next_minute))
 
 if __name__ == "__main__":
+    init_all_databases()
     minute_loop()

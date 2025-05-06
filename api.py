@@ -33,7 +33,6 @@ def to_unix_ms(val: Optional[str]):
     try:
         if str(val).isdigit():
             n = int(val)
-            # auto-detect ms or sec
             return n if n > 10**11 else n*1000
         else:
             dt = dateparser.parse(val)

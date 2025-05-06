@@ -44,6 +44,58 @@ formatter = logging.Formatter('%(asctime)s %(levelname)s [%(name)s]: %(message)s
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+def get_last_open_time(db_path):
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute(f"SELECT MAX(open_time) FROM {TABLE_NAME}")
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+def insert_kline(db_path, kline):
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            f"INSERT OR IGNORE INTO {TABLE_NAME} ({', '.join(COLUMNS)}) VALUES ({', '.join(['?']*len(COLUMNS))})",
+            kline
+        )
+    conn.close()
+
+def batch_fill_history(symbol, db_path, earliest_time=None):
+    url = "https://api.binance.com/api/v3/klines"
+    headers = {"X-MBX-APIKEY": BINANCE_API_KEY}
+    last_time = get_last_open_time(db_path)
+    if last_time is None:
+        if earliest_time is not None:
+            start_ms = earliest_time
+        else:
+            start_ms = int(datetime(2017, 8, 17, 4, 0).timestamp()) * 1000
+    else:
+        start_ms = last_time + 60000
+    now_ms = int(time.time()) * 1000
+    while start_ms < now_ms:
+        limit = min(N_MINUTES, (now_ms - start_ms) // 60000 + 1)
+        params = {
+            "symbol": symbol,
+            "interval": "1m",
+            "startTime": start_ms,
+            "limit": limit
+        }
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if not data:
+                break
+            for kline in data:
+                insert_kline(db_path, kline)
+            logger.info(f"{symbol} fill: {len(data)} candles {datetime.utcfromtimestamp(data[0][0]/1000)} - {datetime.utcfromtimestamp(data[-1][0]/1000)}")
+            start_ms = data[-1][0] + 60000
+            time.sleep(0.2)
+        except Exception as e:
+            logger.error(f"{symbol} error in batch fill: {e}")
+            break
+
 def get_last_n_open_times(db_path, n):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -61,21 +113,13 @@ def fetch_binance_n_klines(symbol, n):
     data = r.json()
     return data if data else []
 
-def insert_kline(db_path, kline):
-    conn = sqlite3.connect(db_path)
-    with conn:
-        conn.execute(
-            f"INSERT OR IGNORE INTO {TABLE_NAME} ({', '.join(COLUMNS)}) VALUES ({', '.join(['?']*len(COLUMNS))})",
-            kline
-        )
-    conn.close()
-
 def minute_loop():
-    logger.info("Minute candles monitor started (mode: check last 1000 minutes, auto log rotation)")
+    logger.info("Minute candles monitor started (batch fill + RT sync, 1000 min, auto log rotation)")
     while True:
         for symbol in SYMBOLS:
             db_path = os.path.join(DB_FOLDER, f"{symbol}.sqlite")
             try:
+                batch_fill_history(symbol, db_path)
                 db_minutes = get_last_n_open_times(db_path, N_MINUTES)
                 klines = fetch_binance_n_klines(symbol, N_MINUTES)
                 new_count = 0
